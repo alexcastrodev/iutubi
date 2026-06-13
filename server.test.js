@@ -151,8 +151,45 @@ const fakeMixPayload = {
   },
 };
 
-// Intercepta só as chamadas pro YouTube (pelo hostname, pra não engolir
-// requests ao servidor local que carregam "youtube.com" no query string).
+// Páginas fake de embed do Spotify, com o __NEXT_DATA__ que o resolver lê.
+const spotifyEmbedHtml = (nextData) =>
+  `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(nextData)}</script></body></html>`;
+
+const fakeSpotifyPlaylistHtml = spotifyEmbedHtml({
+  props: {
+    pageProps: {
+      state: {
+        data: {
+          entity: {
+            title: 'Playlist Spotify Fake',
+            trackList: [
+              { title: 'stupid song', subtitle: 'Olivia Rodrigo' },
+              { title: 'Nightmare', subtitle: 'Avenged Sevenfold, Convidado Qualquer' },
+            ],
+          },
+        },
+      },
+    },
+  },
+});
+
+const fakeSpotifyTrackHtml = spotifyEmbedHtml({
+  props: {
+    pageProps: {
+      state: {
+        data: {
+          entity: {
+            title: 'Bat Country',
+            artists: [{ name: 'Avenged Sevenfold' }],
+          },
+        },
+      },
+    },
+  },
+});
+
+// Intercepta só as chamadas externas (YouTube e Spotify, pelo hostname, pra não
+// engolir requests ao servidor local que carregam essas URLs no query string).
 function mockInnerTube(t) {
   const realFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', (input, init) => {
@@ -164,6 +201,12 @@ function mockInnerTube(t) {
           ? fakeMixPayload
           : fakePayload;
       return Promise.resolve({ ok: true, json: async () => payload });
+    }
+    if (url.hostname.endsWith('spotify.com')) {
+      const html = url.pathname.includes('/track/')
+        ? fakeSpotifyTrackHtml
+        : fakeSpotifyPlaylistHtml;
+      return Promise.resolve({ ok: true, text: async () => html });
     }
     return realFetch(input, init);
   });
@@ -278,6 +321,36 @@ test('URL de mix (list=RD...) resolve via /next', async (t) => {
   ]);
 });
 
+const SPOTIFY_PLAYLIST_URL = 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M';
+
+test('URL de playlist do Spotify resolve os nomes com type spotify', async (t) => {
+  mockInnerTube(t);
+  const res = await search(SPOTIFY_PLAYLIST_URL, 'cliente-spotify');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'spotify');
+  assert.equal(body.response.kind, 'playlist');
+  assert.equal(body.response.id, '37i9dQZF1DXcBWIGoYBM5M');
+  assert.equal(body.response.title, 'Playlist Spotify Fake');
+  assert.deepEqual(body.response.tracks, [
+    'Olivia Rodrigo stupid song',
+    'Avenged Sevenfold Nightmare',
+  ]);
+});
+
+test('URL de track do Spotify resolve um único nome', async (t) => {
+  mockInnerTube(t);
+  const res = await search(
+    'https://open.spotify.com/intl-pt/track/5dRQUolXAVX3BbCiIxmSsf?si=abc123',
+    'cliente-spotify-track',
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'spotify');
+  assert.equal(body.response.kind, 'track');
+  assert.deepEqual(body.response.tracks, ['Avenged Sevenfold Bat Country']);
+});
+
 test('URL sem parâmetro list cai na busca comum', async (t) => {
   mockInnerTube(t);
   const res = await search('https://www.youtube.com/watch?v=KAljnUezZFk', 'cliente-sem-list');
@@ -363,6 +436,20 @@ test('integração: resolve o mix real via /next', async () => {
     body.response.videos.some((v) => v.videoId === '7NK_JOkuSVY'),
     'esperava encontrar o vídeo semente (7NK_JOkuSVY) no mix',
   );
+});
+
+test('integração: resolve a playlist real do Spotify', async () => {
+  const res = await search(SPOTIFY_PLAYLIST_URL, 'cliente-spotify-integracao');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'spotify');
+  assert.equal(body.response.kind, 'playlist');
+  assert.ok(body.response.title.length > 0, 'esperava o título da playlist');
+  assert.ok(body.response.tracks.length > 0, 'esperava ao menos uma faixa');
+  for (const term of body.response.tracks) {
+    assert.equal(typeof term, 'string');
+    assert.ok(term.trim().length > 0);
+  }
 });
 
 test('integração: resolve a playlist real', async () => {

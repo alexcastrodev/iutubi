@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { PlaylistResolver } from './playlist-resolver.js';
+import { SpotifyResolver } from './spotify-resolver.js';
 import { SearchResolver } from './search-resolver.js';
 
 const PORT = Number(process.env.PORT ?? 3333);
@@ -24,7 +25,7 @@ setInterval(() => {
   }
 }, 10_000).unref();
 
-const resolvers = [new PlaylistResolver(), new SearchResolver()];
+const resolvers = [new PlaylistResolver(), new SpotifyResolver(), new SearchResolver()];
 
 function sendJson(res, status, type, response) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
