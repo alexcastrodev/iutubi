@@ -90,8 +90,13 @@ export function createApp() {
   });
 }
 
+// Vercel implanta este módulo como servidor (/var/task/server.mjs) e exige que
+// o default export seja uma função ou um http.Server.
+const app = createApp();
+export default app;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  createApp().listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`InnerTube demo ouvindo em http://localhost:${PORT}/search?q=...`);
   });
 }
