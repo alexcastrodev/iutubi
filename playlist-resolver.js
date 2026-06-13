@@ -29,6 +29,43 @@ export class PlaylistResolver extends Resolver {
 
   async resolve(input, limit = 100) {
     const playlistId = this.playlistId(input);
+    return playlistId.startsWith('RD')
+      ? this.resolveMix(input, playlistId, limit)
+      : this.resolveBrowse(playlistId, limit);
+  }
+
+  // Mixes (list=RD...) não são navegáveis pelo /browse ("This playlist type is
+  // unviewable"); o player os resolve pelo /next com o vídeo semente.
+  async resolveMix(input, playlistId, limit) {
+    const videoId = new URL(input).searchParams.get('v') ?? undefined;
+    const data = await innerTube('next', { videoId, playlistId });
+
+    let title = '';
+    const videos = [];
+    (function walk(node) {
+      if (videos.length >= limit || node === null || typeof node !== 'object') return;
+      if (!Array.isArray(node)) {
+        if (node.playlist?.playlist?.title) {
+          title = node.playlist.playlist.title;
+        }
+        const v = node.playlistPanelVideoRenderer;
+        if (v?.videoId) {
+          videos.push({
+            videoId: v.videoId,
+            url: `https://www.youtube.com/watch?v=${v.videoId}`,
+            title: v.title?.simpleText ?? '',
+            channel: v.shortBylineText?.runs?.[0]?.text ?? '',
+            duration: v.lengthText?.simpleText ?? '',
+          });
+          return;
+        }
+      }
+      for (const child of Object.values(node)) walk(child);
+    })(data);
+    return { playlistId, title, videos };
+  }
+
+  async resolveBrowse(playlistId, limit) {
     const data = await innerTube('browse', { browseId: `VL${playlistId}` });
 
     let title = '';

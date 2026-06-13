@@ -82,6 +82,37 @@ const fakePlaylistPayload = {
   ],
 };
 
+// Resposta fake do /next, usado pra resolver mixes (list=RD...).
+const fakeMixPayload = {
+  contents: {
+    twoColumnWatchNextResults: {
+      playlist: {
+        playlist: {
+          title: 'Mix Fake',
+          contents: [
+            {
+              playlistPanelVideoRenderer: {
+                videoId: '7NK_JOkuSVY',
+                title: { simpleText: 'Lost' },
+                shortBylineText: { runs: [{ text: 'Linkin Park' }] },
+                lengthText: { simpleText: '3:19' },
+              },
+            },
+            {
+              playlistPanelVideoRenderer: {
+                videoId: 'eVTXPUF4Oz4',
+                title: { simpleText: 'In The End' },
+                shortBylineText: { runs: [{ text: 'Linkin Park' }] },
+                lengthText: { simpleText: '3:36' },
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
+};
+
 // Intercepta só as chamadas pro YouTube (pelo hostname, pra não engolir
 // requests ao servidor local que carregam "youtube.com" no query string).
 function mockInnerTube(t) {
@@ -89,7 +120,11 @@ function mockInnerTube(t) {
   t.mock.method(globalThis, 'fetch', (input, init) => {
     const url = new URL(typeof input === 'string' ? input : input.url);
     if (url.hostname.endsWith('youtube.com')) {
-      const payload = url.pathname.includes('/browse') ? fakePlaylistPayload : fakePayload;
+      const payload = url.pathname.includes('/browse')
+        ? fakePlaylistPayload
+        : url.pathname.includes('/next')
+          ? fakeMixPayload
+          : fakePayload;
       return Promise.resolve({ ok: true, json: async () => payload });
     }
     return realFetch(input, init);
@@ -176,6 +211,35 @@ test('URL de playlist colada sem encodar também resolve a playlist', async (t) 
   assert.equal(body.response.playlistId, 'PLgF5KLwzxU-17Fjn6-viXiHGnlrDgMixu');
 });
 
+const MIX_URL =
+  'https://www.youtube.com/watch?v=7NK_JOkuSVY&list=RDEMww6ZEHgLhQ-8eu_x7Z-FJw';
+
+test('URL de mix (list=RD...) resolve via /next', async (t) => {
+  mockInnerTube(t);
+  const res = await search(MIX_URL, 'cliente-mix');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'playlist');
+  assert.equal(body.response.playlistId, 'RDEMww6ZEHgLhQ-8eu_x7Z-FJw');
+  assert.equal(body.response.title, 'Mix Fake');
+  assert.deepEqual(body.response.videos, [
+    {
+      videoId: '7NK_JOkuSVY',
+      url: 'https://www.youtube.com/watch?v=7NK_JOkuSVY',
+      title: 'Lost',
+      channel: 'Linkin Park',
+      duration: '3:19',
+    },
+    {
+      videoId: 'eVTXPUF4Oz4',
+      url: 'https://www.youtube.com/watch?v=eVTXPUF4Oz4',
+      title: 'In The End',
+      channel: 'Linkin Park',
+      duration: '3:36',
+    },
+  ]);
+});
+
 test('URL sem parâmetro list cai na busca comum', async (t) => {
   mockInnerTube(t);
   const res = await search('https://www.youtube.com/watch?v=KAljnUezZFk', 'cliente-sem-list');
@@ -244,6 +308,23 @@ test('integração: busca real na InnerTube', async () => {
     assert.equal(r.url, `https://www.youtube.com/watch?v=${r.videoId}`);
     assert.ok(r.title.length > 0);
   }
+});
+
+test('integração: resolve o mix real via /next', async () => {
+  const res = await search(MIX_URL, 'cliente-mix-integracao');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'playlist');
+  assert.equal(body.response.playlistId, 'RDEMww6ZEHgLhQ-8eu_x7Z-FJw');
+  assert.ok(body.response.videos.length > 0, 'esperava ao menos um vídeo no mix');
+  for (const v of body.response.videos) {
+    assert.match(v.videoId, /^[A-Za-z0-9_-]{11}$/);
+    assert.ok(v.title.length > 0);
+  }
+  assert.ok(
+    body.response.videos.some((v) => v.videoId === '7NK_JOkuSVY'),
+    'esperava encontrar o vídeo semente (7NK_JOkuSVY) no mix',
+  );
 });
 
 test('integração: resolve a playlist real', async () => {
