@@ -164,6 +164,18 @@ test('URL com list resolve a playlist com type playlist', async (t) => {
   ]);
 });
 
+test('URL de playlist colada sem encodar também resolve a playlist', async (t) => {
+  mockInnerTube(t);
+  // sem encodeURIComponent: o &list= viraria parâmetro do nosso endpoint
+  const res = await fetch(`${baseUrl}/search?q=${PLAYLIST_URL}`, {
+    headers: { 'X-Client-Id': 'cliente-sem-encode' },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'playlist');
+  assert.equal(body.response.playlistId, 'PLgF5KLwzxU-17Fjn6-viXiHGnlrDgMixu');
+});
+
 test('URL sem parâmetro list cai na busca comum', async (t) => {
   mockInnerTube(t);
   const res = await search('https://www.youtube.com/watch?v=KAljnUezZFk', 'cliente-sem-list');

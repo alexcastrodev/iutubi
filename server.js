@@ -50,9 +50,20 @@ function rateLimitClient(req, res) {
   return true;
 }
 
+// q é sempre o último parâmetro da nossa API, então tudo depois de q= pertence
+// a ele — inclusive &list=... de uma URL do YouTube colada sem encodar.
+function extractQuery(reqUrl) {
+  const match = reqUrl.match(/[?&]q=(.*)$/);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]).trim();
+  } catch {
+    return match[1].trim();
+  }
+}
+
 export async function handleSearch(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const query = url.searchParams.get('q')?.trim();
+  const query = extractQuery(req.url);
   if (!query) {
     return sendJson(res, 400, 'error', { error: 'Parâmetro q é obrigatório' });
   }
