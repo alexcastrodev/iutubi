@@ -29,13 +29,49 @@ const fakePayload = {
 };
 
 // Resposta fake do /browse de playlist no formato novo (lockupViewModel).
+// Os itens vêm propositalmente fora de ordem no JSON: a ordem da playlist
+// é dada pelo index do watchEndpoint, que o resolver deve respeitar.
+const fakePlaylistContext = (videoId, index) => ({
+  commandContext: {
+    onTap: {
+      innertubeCommand: {
+        watchEndpoint: {
+          videoId,
+          playlistId: 'PLgF5KLwzxU-17Fjn6-viXiHGnlrDgMixu',
+          index,
+        },
+      },
+    },
+  },
+});
+
 const fakePlaylistPayload = {
   metadata: { playlistMetadataRenderer: { title: 'Playlist Fake' } },
   contents: [
     {
       lockupViewModel: {
+        contentId: 'aWxBrI0g1kg',
+        contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        rendererContext: fakePlaylistContext('aWxBrI0g1kg', 1),
+        metadata: {
+          lockupMetadataViewModel: {
+            title: { content: 'Hail to the King' },
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [
+                  { metadataParts: [{ text: { content: 'Avenged Sevenfold' } }] },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      lockupViewModel: {
         contentId: 'KAljnUezZFk',
         contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        rendererContext: fakePlaylistContext('KAljnUezZFk', 0),
         contentImage: {
           thumbnailViewModel: {
             overlays: [
@@ -62,27 +98,27 @@ const fakePlaylistPayload = {
       },
     },
     {
+      // lockup de shelf de recomendação (outra playlist): deve ser ignorado
       lockupViewModel: {
-        contentId: 'aWxBrI0g1kg',
+        contentId: 'zzzIGNOREDz',
         contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
-        metadata: {
-          lockupMetadataViewModel: {
-            title: { content: 'Hail to the King' },
-            metadata: {
-              contentMetadataViewModel: {
-                metadataRows: [
-                  { metadataParts: [{ text: { content: 'Avenged Sevenfold' } }] },
-                ],
+        rendererContext: {
+          commandContext: {
+            onTap: {
+              innertubeCommand: {
+                watchEndpoint: { videoId: 'zzzIGNOREDz', playlistId: 'RDOUTRA', index: 0 },
               },
             },
           },
         },
+        metadata: { lockupMetadataViewModel: { title: { content: 'Recomendado' } } },
       },
     },
   ],
 };
 
 // Resposta fake do /next, usado pra resolver mixes (list=RD...).
+// Também fora de ordem no JSON, com a ordem real no index do watchEndpoint.
 const fakeMixPayload = {
   contents: {
     twoColumnWatchNextResults: {
@@ -92,18 +128,20 @@ const fakeMixPayload = {
           contents: [
             {
               playlistPanelVideoRenderer: {
-                videoId: '7NK_JOkuSVY',
-                title: { simpleText: 'Lost' },
+                videoId: 'eVTXPUF4Oz4',
+                navigationEndpoint: { watchEndpoint: { videoId: 'eVTXPUF4Oz4', index: 1 } },
+                title: { simpleText: 'In The End' },
                 shortBylineText: { runs: [{ text: 'Linkin Park' }] },
-                lengthText: { simpleText: '3:19' },
+                lengthText: { simpleText: '3:36' },
               },
             },
             {
               playlistPanelVideoRenderer: {
-                videoId: 'eVTXPUF4Oz4',
-                title: { simpleText: 'In The End' },
+                videoId: '7NK_JOkuSVY',
+                navigationEndpoint: { watchEndpoint: { videoId: '7NK_JOkuSVY', index: 0 } },
+                title: { simpleText: 'Lost' },
                 shortBylineText: { runs: [{ text: 'Linkin Park' }] },
-                lengthText: { simpleText: '3:36' },
+                lengthText: { simpleText: '3:19' },
               },
             },
           ],
