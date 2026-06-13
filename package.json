@@ -1,0 +1,14 @@
+{
+  "name": "innertube-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Demo: busca de vídeos do YouTube via API interna (InnerTube), com throttle e limite por cliente",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
