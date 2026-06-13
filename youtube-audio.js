@@ -1,7 +1,7 @@
 import vm from 'node:vm';
 import { Innertube, Platform, Utils } from 'youtubei.js';
 import { BG } from 'bgutils-js';
-import { JSDOM } from 'jsdom';
+import { Window } from 'happy-dom';
 
 // O YouTube cifra as URLs de stream e estrangula o download a ~0,04 MB/s para
 // quem não apresenta um PoToken (atestação BotGuard). Com ele, o client IOS
@@ -26,14 +26,13 @@ async function buildClient() {
   const seed = await Innertube.create({ retrieve_player: false });
   const visitorData = seed.session.context.client.visitorData;
 
-  // O BotGuard espera um ambiente de browser; jsdom faz o papel de DOM falso.
-  // O interpretador roda em escopo global e procura por `window`/`document`,
-  // então os expomos no globalThis do processo durante a geração do token.
-  const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-    url: 'https://www.youtube.com/',
-  });
-  globalThis.window = dom.window;
-  globalThis.document = dom.window.document;
+  // O BotGuard espera um ambiente de browser; happy-dom faz o papel de DOM
+  // falso (mais leve que jsdom e ESM puro, evitando o erro de require() de ESM
+  // ao rodar em serverless). O interpretador roda em escopo global e procura
+  // por `window`/`document`, então os expomos no globalThis durante a geração.
+  const win = new Window({ url: 'https://www.youtube.com/' });
+  globalThis.window = win;
+  globalThis.document = win.document;
   const globalObj = globalThis;
 
   const bgConfig = { fetch, globalObj, identifier: visitorData, requestKey: BG_REQUEST_KEY };
