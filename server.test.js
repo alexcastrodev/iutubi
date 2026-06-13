@@ -28,18 +28,76 @@ const fakePayload = {
   ],
 };
 
-// Intercepta só as chamadas pro YouTube; o fetch que os testes usam
-// pra falar com o servidor local continua real (mesmo processo).
+// Resposta fake do /browse de playlist no formato novo (lockupViewModel).
+const fakePlaylistPayload = {
+  metadata: { playlistMetadataRenderer: { title: 'Playlist Fake' } },
+  contents: [
+    {
+      lockupViewModel: {
+        contentId: 'KAljnUezZFk',
+        contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        contentImage: {
+          thumbnailViewModel: {
+            overlays: [
+              {
+                thumbnailOverlayBadgeViewModel: {
+                  thumbnailBadges: [{ thumbnailBadgeViewModel: { text: '6:15' } }],
+                },
+              },
+            ],
+          },
+        },
+        metadata: {
+          lockupMetadataViewModel: {
+            title: { content: 'Nightmare' },
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [
+                  { metadataParts: [{ text: { content: 'Avenged Sevenfold' } }] },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      lockupViewModel: {
+        contentId: 'aWxBrI0g1kg',
+        contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+        metadata: {
+          lockupMetadataViewModel: {
+            title: { content: 'Hail to the King' },
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [
+                  { metadataParts: [{ text: { content: 'Avenged Sevenfold' } }] },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+  ],
+};
+
+// Intercepta só as chamadas pro YouTube (pelo hostname, pra não engolir
+// requests ao servidor local que carregam "youtube.com" no query string).
 function mockInnerTube(t) {
   const realFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', (input, init) => {
-    const url = typeof input === 'string' ? input : input.url;
-    if (url.includes('youtube.com')) {
-      return Promise.resolve({ ok: true, json: async () => fakePayload });
+    const url = new URL(typeof input === 'string' ? input : input.url);
+    if (url.hostname.endsWith('youtube.com')) {
+      const payload = url.pathname.includes('/browse') ? fakePlaylistPayload : fakePayload;
+      return Promise.resolve({ ok: true, json: async () => payload });
     }
     return realFetch(input, init);
   });
 }
+
+const PLAYLIST_URL =
+  'https://www.youtube.com/watch?v=KAljnUezZFk&list=PLgF5KLwzxU-17Fjn6-viXiHGnlrDgMixu';
 
 function search(query, clientId) {
   return fetch(`${baseUrl}/search?q=${encodeURIComponent(query)}`, {
@@ -47,23 +105,29 @@ function search(query, clientId) {
   });
 }
 
-test('rota desconhecida responde 404', async () => {
+test('rota desconhecida responde 404 com type error', async () => {
   const res = await fetch(`${baseUrl}/outra-rota`);
   assert.equal(res.status, 404);
+  const body = await res.json();
+  assert.equal(body.type, 'error');
+  assert.ok(body.response.error);
 });
 
-test('busca sem q responde 400', async () => {
+test('busca sem q responde 400 com type error', async () => {
   const res = await fetch(`${baseUrl}/search`);
   assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.type, 'error');
 });
 
-test('busca retorna os resultados da InnerTube', async (t) => {
+test('texto de busca resolve com type search', async (t) => {
   mockInnerTube(t);
   const res = await search('musica qualquer', 'cliente-busca');
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.query, 'musica qualquer');
-  assert.deepEqual(body.results, [
+  assert.equal(body.type, 'search');
+  assert.equal(body.response.query, 'musica qualquer');
+  assert.deepEqual(body.response.results, [
     {
       videoId: 'dQw4w9WgXcQ',
       url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -74,6 +138,40 @@ test('busca retorna os resultados da InnerTube', async (t) => {
   ]);
 });
 
+test('URL com list resolve a playlist com type playlist', async (t) => {
+  mockInnerTube(t);
+  const res = await search(PLAYLIST_URL, 'cliente-playlist');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'playlist');
+  assert.equal(body.response.playlistId, 'PLgF5KLwzxU-17Fjn6-viXiHGnlrDgMixu');
+  assert.equal(body.response.title, 'Playlist Fake');
+  assert.deepEqual(body.response.videos, [
+    {
+      videoId: 'KAljnUezZFk',
+      url: 'https://www.youtube.com/watch?v=KAljnUezZFk',
+      title: 'Nightmare',
+      channel: 'Avenged Sevenfold',
+      duration: '6:15',
+    },
+    {
+      videoId: 'aWxBrI0g1kg',
+      url: 'https://www.youtube.com/watch?v=aWxBrI0g1kg',
+      title: 'Hail to the King',
+      channel: 'Avenged Sevenfold',
+      duration: '',
+    },
+  ]);
+});
+
+test('URL sem parâmetro list cai na busca comum', async (t) => {
+  mockInnerTube(t);
+  const res = await search('https://www.youtube.com/watch?v=KAljnUezZFk', 'cliente-sem-list');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'search');
+});
+
 test('mesmo cliente 2x em menos de 1s recebe 419', async (t) => {
   mockInnerTube(t);
   const primeira = await search('a', 'cliente-419');
@@ -81,7 +179,8 @@ test('mesmo cliente 2x em menos de 1s recebe 419', async (t) => {
   assert.equal(primeira.status, 200);
   assert.equal(segunda.status, 419);
   const body = await segunda.json();
-  assert.ok(body.retryAfterMs > 0 && body.retryAfterMs <= 1000);
+  assert.equal(body.type, 'error');
+  assert.ok(body.response.retryAfterMs > 0 && body.response.retryAfterMs <= 1000);
 });
 
 test('clientes diferentes na mesma janela de 1s passam', async (t) => {
@@ -126,10 +225,29 @@ test('integração: busca real na InnerTube', async () => {
   const res = await search('avenged sevenfold death', 'cliente-integracao');
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.ok(body.results.length > 0, 'esperava ao menos um resultado real');
-  for (const r of body.results) {
+  assert.equal(body.type, 'search');
+  assert.ok(body.response.results.length > 0, 'esperava ao menos um resultado real');
+  for (const r of body.response.results) {
     assert.match(r.videoId, /^[A-Za-z0-9_-]{11}$/);
     assert.equal(r.url, `https://www.youtube.com/watch?v=${r.videoId}`);
     assert.ok(r.title.length > 0);
   }
+});
+
+test('integração: resolve a playlist real', async () => {
+  const res = await search(PLAYLIST_URL, 'cliente-playlist-integracao');
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.type, 'playlist');
+  assert.equal(body.response.playlistId, 'PLgF5KLwzxU-17Fjn6-viXiHGnlrDgMixu');
+  assert.ok(body.response.videos.length > 0, 'esperava ao menos um vídeo na playlist');
+  for (const v of body.response.videos) {
+    assert.match(v.videoId, /^[A-Za-z0-9_-]{11}$/);
+    assert.equal(v.url, `https://www.youtube.com/watch?v=${v.videoId}`);
+    assert.ok(v.title.length > 0);
+  }
+  assert.ok(
+    body.response.videos.some((v) => v.videoId === 'KAljnUezZFk'),
+    'esperava encontrar o vídeo da URL (KAljnUezZFk) na playlist',
+  );
 });
