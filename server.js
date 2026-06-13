@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { PlaylistResolver } from './playlist-resolver.js';
 import { SpotifyResolver } from './spotify-resolver.js';
 import { SearchResolver } from './search-resolver.js';
+import { openAudioStream, streamToIterable } from './youtube-audio.js';
 
 const PORT = Number(process.env.PORT ?? 3333);
 const GLOBAL_RATE = 5;
@@ -80,13 +81,59 @@ export async function handleSearch(req, res) {
   }
 }
 
+// Aceita tanto o videoId cru (11 chars) quanto uma URL do YouTube colada.
+function extractVideoId(value) {
+  if (!value) return undefined;
+  if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
+  const fromUrl = value.match(/[?&]v=([A-Za-z0-9_-]{11})/) ?? value.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+  return fromUrl?.[1];
+}
+
+export async function handleAudio(req, res, url) {
+  const videoId = extractVideoId(url.searchParams.get('v')?.trim());
+  if (!videoId) {
+    return sendJson(res, 400, 'error', { error: 'Parâmetro v (videoId ou URL do YouTube) é obrigatório' });
+  }
+
+  if (!rateLimitClient(req, res)) return;
+  await waitTurn();
+
+  let audio;
+  try {
+    audio = await openAudioStream(videoId);
+  } catch (err) {
+    return sendJson(res, 502, 'error', { error: err.message });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': audio.mimeType,
+    ...(audio.contentLength ? { 'Content-Length': audio.contentLength } : {}),
+    'Content-Disposition': `inline; filename="${audio.title.replace(/[^\w.-]+/g, '_')}.m4a"`,
+  });
+
+  try {
+    for await (const chunk of streamToIterable(audio.stream)) {
+      if (!res.write(chunk)) await new Promise((resolve) => res.once('drain', resolve));
+    }
+    res.end();
+  } catch (err) {
+    // Cabeçalho já foi enviado; só dá pra abortar a conexão.
+    res.destroy(err);
+  }
+}
+
 export function createApp() {
   return http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    if (req.method !== 'GET' || url.pathname !== '/search') {
-      return sendJson(res, 404, 'error', { error: 'Use GET /search?q=<busca ou url de playlist>' });
+    if (req.method === 'GET' && url.pathname === '/search') {
+      return handleSearch(req, res);
     }
-    return handleSearch(req, res);
+    if (req.method === 'GET' && url.pathname === '/audio') {
+      return handleAudio(req, res, url);
+    }
+    return sendJson(res, 404, 'error', {
+      error: 'Use GET /search?q=<busca ou url> ou GET /audio?v=<videoId ou url>',
+    });
   });
 }
 

@@ -469,3 +469,40 @@ test('integração: resolve a playlist real', async () => {
     'esperava encontrar o vídeo da URL (KAljnUezZFk) na playlist',
   );
 });
+
+test('/audio sem parâmetro v responde 400 com type error', async () => {
+  const res = await fetch(`${baseUrl}/audio`, { headers: { 'X-Client-Id': 'audio-sem-v' } });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.type, 'error');
+});
+
+test('/audio com v inválido responde 400 com type error', async () => {
+  const res = await fetch(`${baseUrl}/audio?v=naoehumid`, { headers: { 'X-Client-Id': 'audio-id-ruim' } });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.type, 'error');
+});
+
+const AUDIO_VIDEO_ID = 'jNQXAC9IVRw'; // "Me at the zoo", primeiro vídeo do YouTube (~19s)
+
+test('integração: /audio entrega o m4a do vídeo', async () => {
+  const res = await fetch(`${baseUrl}/audio?v=${AUDIO_VIDEO_ID}`, {
+    headers: { 'X-Client-Id': 'audio-integracao' },
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /^audio\/mp4/);
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.ok(buf.length > 50_000, `esperava um m4a com conteúdo, veio com ${buf.length} bytes`);
+  // Assinatura de container ISO/MP4: bytes 4-8 são "ftyp".
+  assert.equal(buf.subarray(4, 8).toString(), 'ftyp');
+});
+
+test('integração: /audio aceita URL do YouTube colada em v', async () => {
+  const res = await fetch(
+    `${baseUrl}/audio?v=${encodeURIComponent(`https://www.youtube.com/watch?v=${AUDIO_VIDEO_ID}`)}`,
+    { headers: { 'X-Client-Id': 'audio-url-colada' } },
+  );
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /^audio\/mp4/);
+});
