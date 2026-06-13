@@ -506,3 +506,23 @@ test('integração: /audio aceita URL do YouTube colada em v', async () => {
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /^audio\/mp4/);
 });
+
+test('integração: /audio anuncia Accept-Ranges e responde 206 a um Range', async () => {
+  const res = await fetch(`${baseUrl}/audio?v=${AUDIO_VIDEO_ID}`, {
+    headers: { 'X-Client-Id': 'audio-range', Range: 'bytes=0-99999' },
+  });
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('accept-ranges'), 'bytes');
+  const total = Number(res.headers.get('content-range').match(/\/(\d+)$/)[1]);
+  assert.equal(res.headers.get('content-range'), `bytes 0-99999/${total}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  assert.equal(buf.length, 100000);
+});
+
+test('integração: /audio responde 416 a um Range fora do arquivo', async () => {
+  const res = await fetch(`${baseUrl}/audio?v=${AUDIO_VIDEO_ID}`, {
+    headers: { 'X-Client-Id': 'audio-range-416', Range: 'bytes=999999999-' },
+  });
+  assert.equal(res.status, 416);
+  assert.match(res.headers.get('content-range'), /^bytes \*\/\d+$/);
+});

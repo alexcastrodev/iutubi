@@ -65,21 +65,31 @@ function getClient() {
   return clientPromise;
 }
 
-// Abre o melhor stream de áudio (m4a/AAC) do vídeo. Devolve o ReadableStream
-// já decifrado mais os metadados úteis para os cabeçalhos da resposta HTTP.
-export async function openAudioStream(videoId) {
+// Lê os metadados do melhor formato de áudio (m4a/AAC) sem baixar nada.
+// Precede openAudioStream para que o servidor saiba o tamanho total antes de
+// decidir o intervalo de um header Range.
+export async function getAudioMeta(videoId) {
   const yt = await getClient();
   const info = await yt.getBasicInfo(videoId, { client: 'IOS' });
-
   const format = info.chooseFormat({ type: 'audio', quality: 'best' });
-  const stream = await yt.download(videoId, { type: 'audio', quality: 'best', client: 'IOS' });
-
   return {
-    stream,
-    contentLength: Number(format.content_length) || undefined,
+    totalLength: Number(format.content_length) || undefined,
     mimeType: format.mime_type ?? 'audio/mp4',
     title: info.basic_info.title ?? videoId,
   };
+}
+
+// Abre o ReadableStream de áudio já decifrado. Com `range` ({ start, end }) o
+// youtubei.js baixa só aquele intervalo de bytes — usado para responder a
+// requisições com header Range (seek no player).
+export async function openAudioStream(videoId, range) {
+  const yt = await getClient();
+  return yt.download(videoId, {
+    type: 'audio',
+    quality: 'best',
+    client: 'IOS',
+    ...(range ? { range } : {}),
+  });
 }
 
 export const streamToIterable = Utils.streamToIterable;

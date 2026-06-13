@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { PlaylistResolver } from './playlist-resolver.js';
 import { SpotifyResolver } from './spotify-resolver.js';
 import { SearchResolver } from './search-resolver.js';
-import { openAudioStream, streamToIterable } from './youtube-audio.js';
+import { getAudioMeta, openAudioStream, streamToIterable } from './youtube-audio.js';
 
 const PORT = Number(process.env.PORT ?? 3333);
 const GLOBAL_RATE = 5;
@@ -89,7 +89,30 @@ function extractVideoId(value) {
   return fromUrl?.[1];
 }
 
-export async function handleAudio(req, res, url) {
+// Interpreta um header Range simples ("bytes=START-END"), o único formato que
+// os players usam para áudio. Devolve { start, end } limitado ao tamanho total,
+// ou null se não houver Range, ou 'invalid' se o intervalo for impossível.
+function parseRange(header, totalLength) {
+  if (!header) return null;
+  const match = header.match(/^bytes=(\d*)-(\d*)$/);
+  if (!match || !totalLength) return null;
+  const [, rawStart, rawEnd] = match;
+  let start = rawStart === '' ? undefined : Number(rawStart);
+  let end = rawEnd === '' ? undefined : Number(rawEnd);
+  if (start === undefined) {
+    // "bytes=-N": os últimos N bytes.
+    if (end === undefined) return null;
+    start = Math.max(0, totalLength - end);
+    end = totalLength - 1;
+  } else if (end === undefined) {
+    end = totalLength - 1;
+  }
+  end = Math.min(end, totalLength - 1);
+  if (start > end) return 'invalid';
+  return { start, end };
+}
+
+export async function handleAudio(req, res, url = new URL(req.url, `http://${req.headers.host}`)) {
   const videoId = extractVideoId(url.searchParams.get('v')?.trim());
   if (!videoId) {
     return sendJson(res, 400, 'error', { error: 'Parâmetro v (videoId ou URL do YouTube) é obrigatório' });
@@ -98,21 +121,36 @@ export async function handleAudio(req, res, url) {
   if (!rateLimitClient(req, res)) return;
   await waitTurn();
 
-  let audio;
+  let meta;
   try {
-    audio = await openAudioStream(videoId);
+    meta = await getAudioMeta(videoId);
   } catch (err) {
     return sendJson(res, 502, 'error', { error: err.message });
   }
 
-  res.writeHead(200, {
-    'Content-Type': audio.mimeType,
-    ...(audio.contentLength ? { 'Content-Length': audio.contentLength } : {}),
-    'Content-Disposition': `inline; filename="${audio.title.replace(/[^\w.-]+/g, '_')}.m4a"`,
-  });
+  const range = parseRange(req.headers.range, meta.totalLength);
+  if (range === 'invalid') {
+    res.writeHead(416, { 'Content-Range': `bytes */${meta.totalLength}` });
+    return res.end();
+  }
+
+  const filename = `${meta.title.replace(/[^\w.-]+/g, '_')}.m4a`;
+  const headers = {
+    'Content-Type': meta.mimeType,
+    'Content-Disposition': `inline; filename="${filename}"`,
+    'Accept-Ranges': 'bytes',
+  };
+  if (range) {
+    headers['Content-Range'] = `bytes ${range.start}-${range.end}/${meta.totalLength}`;
+    headers['Content-Length'] = range.end - range.start + 1;
+  } else if (meta.totalLength) {
+    headers['Content-Length'] = meta.totalLength;
+  }
+  res.writeHead(range ? 206 : 200, headers);
 
   try {
-    for await (const chunk of streamToIterable(audio.stream)) {
+    const stream = await openAudioStream(videoId, range ?? undefined);
+    for await (const chunk of streamToIterable(stream)) {
       if (!res.write(chunk)) await new Promise((resolve) => res.once('drain', resolve));
     }
     res.end();
